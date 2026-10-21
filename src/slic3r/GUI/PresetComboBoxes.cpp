@@ -308,9 +308,18 @@ int PresetComboBox::update_ams_color()
         colors = iter->second.opt<ConfigOptionStrings>("filament_multi_colour")->values;
     }
     DynamicPrintConfig *cfg        = &wxGetApp().preset_bundle->project_config;
+    // filament_colour has one entry per filament slot. The multi-colour and colour-type lists run
+    // parallel to it but can arrive short, so they are padded before this slot is written.
+    const size_t slot_count = cfg->option<ConfigOptionStrings>("filament_colour")->values.size();
+    if (size_t(m_filament_idx) >= slot_count)
+        return -1;
     auto color_head = static_cast<ConfigOptionStrings*>(cfg->option("filament_colour")->clone()); // single color (the first color if multi-color filament)
     auto color_pack = static_cast<ConfigOptionStrings *>(cfg->option("filament_multi_colour")->clone()); // multi color (all colors in all kinds of filament)
     auto color_type = static_cast<ConfigOptionStrings*>(cfg->option("filament_colour_type")->clone()); // color type
+    for (size_t i = color_pack->values.size(); i < slot_count; ++i)
+        color_pack->values.push_back(color_head->values[i]);
+    if (color_type->values.size() < slot_count)
+        color_type->values.resize(slot_count, "1");
 
     color_head->values[m_filament_idx] = color;
     color_type->values[m_filament_idx] = ctype;
