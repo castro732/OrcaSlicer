@@ -26,6 +26,8 @@ class Http;
 //   POST /server/files/upload (multipart)  -- upload gcode (form fields: file, root, print,
 //                                             plateindex)
 //   POST /printer/print/start (json)       -- {"filename":"<name>.gcode"} starts print
+//   POST /printer/gcode/script (json)      -- {"script":"<gcode>"} runs the upload's pre_print_gcode
+//                                             before an upload that starts a print
 //
 // Auth: Send X-Api-Key when `printhost_apikey` is non-empty. Without a key,
 // requests rely on Moonraker's `[authorization] trusted_clients`; `force_logins`
@@ -60,6 +62,7 @@ protected:
     void set_auth(Http &http) const;
     std::string make_url(const std::string &path) const;
     bool start_print(wxString &error_msg, const std::string &filename) const;
+    bool run_gcode(wxString &error_msg, const std::string &script) const;
 };
 
 }
