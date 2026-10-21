@@ -211,6 +211,41 @@ bool Moonraker::start_print(wxString &error_msg, const std::string &filename) co
     return res;
 }
 
+bool Moonraker::run_gcode(wxString &error_msg, const std::string &script) const
+{
+    //ORCA: POST /printer/gcode/script with JSON body { "script": "<gcode>" }. A command the firmware
+    //      refuses fails with HTTP 400, carrying the firmware's message.
+    const char *name = get_name();
+    bool res = true;
+    const std::string url = make_url("printer/gcode/script");
+    pt::ptree body_tree;
+    body_tree.put("script", script);
+    std::ostringstream body_ss;
+    pt::write_json(body_ss, body_tree, /*pretty=*/false);
+
+    BOOST_LOG_TRIVIAL(info) << boost::format("%1%: Running `%2%` at %3%") % name % script % url;
+
+    auto http = Http::post(url);
+    set_auth(http);
+    http.header("Content-Type", "application/json")
+        .set_post_body(body_ss.str())
+        .on_complete([&](std::string body, unsigned status) {
+            BOOST_LOG_TRIVIAL(debug) << boost::format("%1%: gcode/script HTTP %2%: %3%") % name % status % body;
+        })
+        .on_error([&](std::string body, std::string error, unsigned status) {
+            BOOST_LOG_TRIVIAL(error) << boost::format("%1%: Error running `%2%` at %3%: %4%, HTTP %5%, body: `%6%`")
+                % name % script % url % error % status % body;
+            res = false;
+            error_msg = format_error(body, error, status);
+        })
+#ifdef WIN32
+        .ssl_revoke_best_effort(m_ssl_revoke_best_effort)
+#endif
+        .perform_sync();
+
+    return res;
+}
+
 bool Moonraker::upload(PrintHostUpload upload_data, ProgressFn progress_fn, ErrorFn error_fn, InfoFn info_fn) const
 {
     // POST /server/files/upload with `print=true` so Moonraker starts the print
@@ -238,6 +273,17 @@ bool Moonraker::upload(PrintHostUpload upload_data, ProgressFn progress_fn, Erro
     const std::string root = upload_data.storage.empty() ? std::string("gcodes") : upload_data.storage;
 
     const bool want_start = upload_data.post_action == PrintHostPostUploadAction::StartPrint;
+
+    //ORCA: settings a firmware accepts only while idle (the Snapmaker U1's print preferences, see
+    //      SnapmakerPrintHostSendDialog) go to the printer before the upload starts the print.
+    const std::string pre_print_gcode = upload_data.extended("pre_print_gcode");
+    if (want_start && !pre_print_gcode.empty()) {
+        wxString gcode_msg;
+        if (!run_gcode(gcode_msg, pre_print_gcode)) {
+            error_fn(std::move(gcode_msg));
+            return false;
+        }
+    }
 
     std::string url = make_url("server/files/upload");
     bool result = true;
