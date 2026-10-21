@@ -3910,6 +3910,22 @@ static void load_mixed_filament_settings(DynamicPrintConfig &project_config, App
     }
 }
 
+// One multi-colour entry per filament slot. A slot whose saved entry is empty or missing takes its
+// single colour: lists saved shorter than the slots (filament sync used to save them empty) would
+// otherwise be written past their end on the next filament selection.
+static std::vector<std::string> load_filament_multi_colors(AppConfig &config, const std::string &printer,
+                                                           const std::vector<std::string> &filament_colors)
+{
+    std::vector<std::string> multi_colors;
+    if (config.has_printer_setting(printer, "filament_multi_colors"))
+        boost::algorithm::split(multi_colors, config.get_printer_setting(printer, "filament_multi_colors"), boost::algorithm::is_any_of(","));
+    multi_colors.resize(filament_colors.size());
+    for (size_t i = 0; i < multi_colors.size(); ++i)
+        if (multi_colors[i].empty())
+            multi_colors[i] = filament_colors[i];
+    return multi_colors;
+}
+
 void PresetBundle::update_selections(AppConfig &config)
 {
     std::string initial_printer_profile_name    = printers.get_selected_preset_name();
@@ -3945,12 +3961,8 @@ void PresetBundle::update_selections(AppConfig &config)
     filament_colors.resize(filament_presets.size(), "#26A69A");
     project_config.option<ConfigOptionStrings>("filament_colour")->values = filament_colors;
 
-    std::vector<std::string> multi_filament_colors;
-    if (config.has_printer_setting(initial_printer_profile_name, "filament_multi_colors")) {
-        boost::algorithm::split(multi_filament_colors, config.get_printer_setting(initial_printer_profile_name, "filament_multi_colors"), boost::algorithm::is_any_of(","));
-    }
-    if (multi_filament_colors.size() == 0) project_config.option<ConfigOptionStrings>("filament_multi_colour")->values = filament_colors;
-    else project_config.option<ConfigOptionStrings>("filament_multi_colour")->values = multi_filament_colors;
+    project_config.option<ConfigOptionStrings>("filament_multi_colour")->values =
+        load_filament_multi_colors(config, initial_printer_profile_name, filament_colors);
 
     std::vector<std::string> filament_color_types;
     if (config.has_printer_setting(initial_printer_profile_name, "filament_color_types")) {
@@ -4108,12 +4120,8 @@ void PresetBundle::load_selections(AppConfig &config, const PresetPreferences& p
     filament_colors.resize(filament_presets.size(), "#26A69A");
     project_config.option<ConfigOptionStrings>("filament_colour")->values = filament_colors;
 
-    std::vector<std::string> multi_filament_colors;
-    if (config.has_printer_setting(initial_printer_profile_name, "filament_multi_colors")) {
-        boost::algorithm::split(multi_filament_colors, config.get_printer_setting(initial_printer_profile_name, "filament_multi_colors"), boost::algorithm::is_any_of(","));
-    }
-    if (multi_filament_colors.size() == 0) project_config.option<ConfigOptionStrings>("filament_multi_colour")->values = filament_colors;
-    else project_config.option<ConfigOptionStrings>("filament_multi_colour")->values = multi_filament_colors;
+    project_config.option<ConfigOptionStrings>("filament_multi_colour")->values =
+        load_filament_multi_colors(config, initial_printer_profile_name, filament_colors);
 
     std::vector<std::string> filament_color_types;
     if (config.has_printer_setting(initial_printer_profile_name, "filament_color_types")) {
@@ -5065,23 +5073,15 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
 
 void PresetBundle::update_filament_multi_color()
 {
-    std::vector<std::string> exsit_multi_colors;
-    for (auto &fil_item : ams_multi_color_filment){
-        if (fil_item.empty()) break;
-        if (fil_item.size() == 1)
-            exsit_multi_colors.push_back(fil_item[0]);
-        else {
-            std::string colors = "";
-            for (auto &color : fil_item){
-                   colors += color + " ";
-            }
-            colors.erase(colors.size() - 1); // remove last space
-            exsit_multi_colors.push_back(colors);
-        }
-    }
-    ConfigOptionStrings *filament_multi_colour = project_config.option<ConfigOptionStrings>("filament_multi_colour");
-    filament_multi_colour->resize(exsit_multi_colors.size());
-    filament_multi_colour->values = exsit_multi_colors;
+    // One entry per filament slot. A slot without a multi-colour list takes its single colour
+    // instead of ending the list there: Moonraker and Snapmaker printers report no multi-colour
+    // list for any tray, which used to leave this list empty for every slot.
+    const std::vector<std::string> &colors = project_config.option<ConfigOptionStrings>("filament_colour")->values;
+    std::vector<std::string> multi_colors(colors.size());
+    for (size_t i = 0; i < colors.size(); ++i)
+        multi_colors[i] = i < ams_multi_color_filment.size() && !ams_multi_color_filment[i].empty() ?
+                              boost::algorithm::join(ams_multi_color_filment[i], " ") : colors[i];
+    project_config.option<ConfigOptionStrings>("filament_multi_colour")->values = std::move(multi_colors);
 }
 
 std::vector<int> PresetBundle::get_used_tpu_filaments(const std::vector<int> &used_filaments)
