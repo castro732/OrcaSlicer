@@ -42,6 +42,9 @@ protected:
 #endif
     virtual bool validate_version_text(const boost::optional<std::string> &version_text) const;
     virtual bool upload_inner_with_host(PrintHostUpload upload_data, ProgressFn prorgess_fn, ErrorFn error_fn, InfoFn info_fn) const;
+    // Sends the upload's pre_print_gcode to `url` (the api/printer/command endpoint) when the
+    // upload is to start a print.
+    bool run_pre_print_gcode(const PrintHostUpload &upload_data, const std::string &url, ErrorFn error_fn) const;
 
     std::string m_host;
     std::string m_apikey;

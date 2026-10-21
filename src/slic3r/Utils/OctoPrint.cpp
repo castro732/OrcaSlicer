@@ -347,6 +347,8 @@ bool OctoPrint::upload_inner_with_resolved_ip(PrintHostUpload upload_data, Progr
         error_fn(std::move(test_msg_or_host_ip));
         return false;
     }
+    if (!run_pre_print_gcode(upload_data, substitute_host(make_url("api/printer/command"), resolved_addr.to_string()), error_fn))
+        return false;
 
     const char* name = get_name();
     const auto upload_filename = upload_data.upload_path.filename();
@@ -422,6 +424,7 @@ bool OctoPrint::upload_inner_with_host(PrintHostUpload upload_data, ProgressFn p
     }
 
     std::string url;
+    std::string command_url;
     bool res = true;
 
 #ifdef WIN32
@@ -432,6 +435,7 @@ bool OctoPrint::upload_inner_with_host(PrintHostUpload upload_data, ProgressFn p
         // If https is entered we assume signed ceritificate is being used
         // IP resolving will not happen - it could resolve into address not being specified in cert
         url = make_url("api/files/local");
+        command_url = make_url("api/printer/command");
     }
 #ifdef WIN32
     else {
@@ -443,9 +447,13 @@ bool OctoPrint::upload_inner_with_host(PrintHostUpload upload_data, ProgressFn p
         // in original address (m_host) replace host for resolved ip 
         info_fn(L"resolve", test_msg_or_host_ip);
         url = substitute_host(make_url("api/files/local"), GUI::into_u8(test_msg_or_host_ip));
+        command_url = substitute_host(make_url("api/printer/command"), GUI::into_u8(test_msg_or_host_ip));
         BOOST_LOG_TRIVIAL(info) << "Upload address after ip resolve: " << url;
     }
 #endif // _WIN32
+
+    if (!run_pre_print_gcode(upload_data, command_url, error_fn))
+        return false;
 
     const std::string plateindex = upload_data.extended("plateindex");
     BOOST_LOG_TRIVIAL(info) << boost::format("%1%: Uploading file %2% at %3%, filename: %4%, path: %5%, print: %6%, plateindex: %7%")
@@ -491,6 +499,49 @@ bool OctoPrint::upload_inner_with_host(PrintHostUpload upload_data, ProgressFn p
                 BOOST_LOG_TRIVIAL(info) << name << ": Upload canceled";
                 res = false;
             }
+        })
+#ifdef WIN32
+        .ssl_revoke_best_effort(m_ssl_revoke_best_effort)
+#endif
+        .perform_sync();
+
+    return res;
+}
+
+bool OctoPrint::run_pre_print_gcode(const PrintHostUpload &upload_data, const std::string &url, ErrorFn error_fn) const
+{
+    const std::string gcode = upload_data.extended("pre_print_gcode");
+    if (upload_data.post_action != PrintHostPostUploadAction::StartPrint || gcode.empty())
+        return true;
+
+    // POST {"commands": ["<gcode>"]}, which Moonraker's OctoPrint emulation also serves.
+    pt::ptree command;
+    command.put("", gcode);
+    pt::ptree commands;
+    commands.push_back(std::make_pair("", command));
+    pt::ptree body;
+    body.add_child("commands", commands);
+    std::ostringstream body_ss;
+    pt::write_json(body_ss, body, /*pretty=*/false);
+
+    const char *name = get_name();
+    BOOST_LOG_TRIVIAL(info) << boost::format("%1%: Sending `%2%` to %3% before the print") % name % gcode % url;
+
+    bool res  = true;
+    auto http = Http::post(url);
+#ifdef WIN32
+    http.header("Host", Http::get_host_header_value(m_host));
+#endif // WIN32
+    set_auth(http);
+    http.header("Content-Type", "application/json")
+        .set_post_body(body_ss.str())
+        .on_complete([&](std::string body, unsigned status) {
+            BOOST_LOG_TRIVIAL(debug) << boost::format("%1%: printer/command HTTP %2%: %3%") % name % status % body;
+        })
+        .on_error([&](std::string body, std::string error, unsigned status) {
+            BOOST_LOG_TRIVIAL(error) << boost::format("%1%: Error sending `%2%`: %3%, HTTP %4%, body: `%5%`") % name % gcode % error % status % body;
+            error_fn(format_error(body, error, status));
+            res = false;
         })
 #ifdef WIN32
         .ssl_revoke_best_effort(m_ssl_revoke_best_effort)

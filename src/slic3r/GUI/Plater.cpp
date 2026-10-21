@@ -20948,6 +20948,10 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
         const auto* ff_code_opt         = physical_printer_config->option<ConfigOptionString>("printhost_apikey");
         const bool flashforge_local_api = host_type == htFlashforge && ff_serial_opt != nullptr && !ff_serial_opt->value.empty() &&
                                           ff_code_opt != nullptr && !ff_code_opt->value.empty();
+        // The U1 serves both host types through Moonraker, which runs the dialog's pre_print_gcode.
+        const auto* printer_agent_opt   = physical_printer_config->option<ConfigOptionString>("printer_agent");
+        const bool snapmaker_moonraker  = printer_agent_opt != nullptr && printer_agent_opt->value == "snapmaker" &&
+                                          (host_type == htOctoPrint || host_type == htMoonraker);
 
         std::unique_ptr<PrintHostSendDialog> pDlg;
         if (host_type == htElegooLink) {
@@ -20959,6 +20963,10 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
                                                                  storage_paths, storage_names,
                                                                  config->get_bool("open_device_tab_post_upload"),
                                                                  upload_job.printhost.get());
+        } else if (snapmaker_moonraker) {
+            pDlg = std::make_unique<SnapmakerPrintHostSendDialog>(default_output_file, upload_job.printhost->get_post_upload_actions(), groups,
+                                                                  storage_paths, storage_names,
+                                                                  config->get_bool("open_device_tab_post_upload"));
         } else if (flashforge_local_api) {
             auto* flashforge_host = dynamic_cast<Flashforge*>(upload_job.printhost.get());
             if (flashforge_host == nullptr) {

@@ -223,6 +223,32 @@ private:
     std::vector<BitmapComboBox*> m_slot_combos; // one per gcode filament
 };
 
+// The Snapmaker U1 levels the bed and records a timelapse only when its per-print preferences say
+// so. The firmware turns both off after every print and refuses to change them while a print is
+// running, so the start G-code cannot set them: they go to the printer as a pre_print_gcode the
+// host runs before uploading and starting the print.
+class SnapmakerPrintHostSendDialog : public PrintHostSendDialog
+{
+public:
+    SnapmakerPrintHostSendDialog(const boost::filesystem::path& path,
+                                 PrintHostPostUploadActions     post_actions,
+                                 const wxArrayString&           groups,
+                                 const wxArrayString&           storage_paths,
+                                 const wxArrayString&           storage_names,
+                                 bool                           switch_to_device_tab);
+
+    void                               init() override;
+    void                               EndModal(int ret) override;
+    std::map<std::string, std::string> extendedInfo() const override;
+
+private:
+    static constexpr const char* CONFIG_KEY_BED_LEVELING = "snapmaker_bed_leveling";
+    static constexpr const char* CONFIG_KEY_TIMELAPSE    = "snapmaker_timelapse";
+
+    bool m_bed_leveling = true;
+    bool m_timelapse    = true;
+};
+
 class FlashforgePrintHostSendDialog : public PrintHostSendDialog
 {
 public:

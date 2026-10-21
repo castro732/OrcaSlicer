@@ -2153,4 +2153,64 @@ std::map<std::string, std::string> CrealityPrintHostSendDialog::extendedInfo() c
     return info;
 }
 
+SnapmakerPrintHostSendDialog::SnapmakerPrintHostSendDialog(const fs::path&            path,
+                                                           PrintHostPostUploadActions post_actions,
+                                                           const wxArrayString&       groups,
+                                                           const wxArrayString&       storage_paths,
+                                                           const wxArrayString&       storage_names,
+                                                           bool                       switch_to_device_tab)
+    : PrintHostSendDialog(path, post_actions, groups, storage_paths, storage_names, switch_to_device_tab)
+{}
+
+void SnapmakerPrintHostSendDialog::init()
+{
+    PrintHostSendDialog::init();
+
+    const AppConfig* app_config = wxGetApp().app_config;
+    if (app_config->has("recent", CONFIG_KEY_BED_LEVELING))
+        m_bed_leveling = app_config->get("recent", CONFIG_KEY_BED_LEVELING) == "1";
+    if (app_config->has("recent", CONFIG_KEY_TIMELAPSE))
+        m_timelapse = app_config->get("recent", CONFIG_KEY_TIMELAPSE) == "1";
+
+    // Applied with "Upload and Print" only; an upload alone leaves the printer's preferences as they are.
+    auto add_option = [this](const wxString& label, bool& value) {
+        auto* sizer    = new wxBoxSizer(wxHORIZONTAL);
+        auto* checkbox = new ::CheckBox(this);
+        checkbox->SetValue(value);
+        checkbox->Bind(wxEVT_TOGGLEBUTTON, [&value](wxCommandEvent& e) {
+            value = e.IsChecked();
+            e.Skip();
+        });
+        sizer->Add(checkbox, 0, wxALL | wxALIGN_CENTER, FromDIP(2));
+        auto* text = new wxStaticText(this, wxID_ANY, label);
+        text->SetFont(::Label::Body_13);
+        text->SetForegroundColour(StateColor::darkModeColorFor(wxColour("#323A3D")));
+        sizer->Add(text, 0, wxALL | wxALIGN_CENTER, FromDIP(2));
+        content_sizer->Add(sizer);
+        content_sizer->AddSpacer(VERT_SPACING);
+    };
+    add_option(_L("Bed leveling"), m_bed_leveling);
+    add_option(_L("Timelapse"), m_timelapse);
+
+    Layout();
+    Fit();
+}
+
+void SnapmakerPrintHostSendDialog::EndModal(int ret)
+{
+    if (ret == wxID_OK) {
+        AppConfig* app_config = wxGetApp().app_config;
+        app_config->set("recent", CONFIG_KEY_BED_LEVELING, m_bed_leveling ? "1" : "0");
+        app_config->set("recent", CONFIG_KEY_TIMELAPSE, m_timelapse ? "1" : "0");
+    }
+    PrintHostSendDialog::EndModal(ret);
+}
+
+std::map<std::string, std::string> SnapmakerPrintHostSendDialog::extendedInfo() const
+{
+    // Both preferences are sent every time: the firmware turns them off after each print.
+    return {{"pre_print_gcode", std::string("SET_PRINT_PREFERENCES BED_LEVEL=") + (m_bed_leveling ? "1" : "0") +
+                                    " TIME_LAPSE_CAMERA=" + (m_timelapse ? "1" : "0")}};
+}
+
 }}
