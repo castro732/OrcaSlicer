@@ -1,0 +1,26 @@
+name: Build Linux x86_64
+
+# Builds only the Ubuntu 24.04 x86_64 AppImage and runs its unit tests, so a fix
+# branch on a fork can be tried without the full build_all matrix.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'fix/**'
+
+jobs:
+  build_linux:
+    name: Build Linux x86_64
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: ubuntu-24.04
+      arch: ''
+    secrets: inherit
+  unit_tests_linux_x86_64:
+    name: Linux x86_64
+    needs: build_linux
+    if: ${{ !cancelled() && success() }}
+    uses: ./.github/workflows/unit_tests.yml
+    with:
+      os: ubuntu-24.04
+      artifact: ${{ github.sha }}-tests-linux-x86_64
