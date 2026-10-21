@@ -855,6 +855,67 @@ TEST_CASE("Selected printer uses its default or saved bed type", "[Preset][Bundl
     CHECK(app_config.get_printer_setting("Test Printer", "curr_bed_type") == std::to_string(static_cast<int>(expected_bed_type)));
 }
 
+// Selecting a filament writes its slot of filament_multi_colour, so the list must have one entry
+// per filament slot or that write lands past its end.
+TEST_CASE("Filament sync keeps one multi-colour entry per slot when the trays report none", "[Preset][Bundle]")
+{
+    PresetBundle bundle;
+    add_inmemory_preset(bundle.printers, "Test Printer");
+    bundle.printers.select_preset_by_name("Test Printer", true);
+    const std::vector<std::string> tray_colors = { "#E64D19", "#FFF700", "#FFFFFF" };
+    bundle.set_num_filaments(unsigned(tray_colors.size()), std::string("#000000"));
+
+    // Trays as a Moonraker or Snapmaker printer reports them: a colour, but no multi-colour list.
+    // Unchanged trays keep each slot's current preset, so the sync needs no preset lookup.
+    for (size_t i = 0; i < tray_colors.size(); ++i) {
+        DynamicPrintConfig tray;
+        tray.set_key_value("filament_id", new ConfigOptionStrings{ "TEST_PLA" });
+        tray.set_key_value("tag_uid", new ConfigOptionStrings{ "" });
+        tray.set_key_value("ams_id", new ConfigOptionStrings{ "0" });
+        tray.set_key_value("slot_id", new ConfigOptionStrings{ std::to_string(i) });
+        tray.set_key_value("filament_type", new ConfigOptionStrings{ "PLA" });
+        tray.set_key_value("tray_name", new ConfigOptionStrings{ "A" + std::to_string(i + 1) });
+        tray.set_key_value("filament_colour", new ConfigOptionStrings{ tray_colors[i] });
+        tray.set_key_value("filament_multi_colour", new ConfigOptionStrings{});
+        tray.set_key_value("filament_colour_type", new ConfigOptionStrings{ "1" });
+        tray.set_key_value("filament_exist", new ConfigOptionBools{ true });
+        tray.set_key_value("filament_slot_placeholder", new ConfigOptionBools{ false });
+        tray.set_key_value("filament_is_support", new ConfigOptionBools{ false });
+        tray.set_key_value("filament_changed", new ConfigOptionBool{ false });
+        bundle.filament_ams_list.emplace(int(i), std::move(tray));
+    }
+
+    std::vector<std::pair<DynamicPrintConfig *, std::string>> unknowns;
+    std::map<int, AMSMapInfo> maps;
+    MergeFilamentInfo merge_info;
+    REQUIRE(bundle.sync_ams_list(unknowns, false, maps, false, merge_info) == tray_colors.size());
+
+    REQUIRE(bundle.project_config.option<ConfigOptionStrings>("filament_colour")->values == tray_colors);
+    CHECK(bundle.project_config.option<ConfigOptionStrings>("filament_multi_colour")->values == tray_colors);
+}
+
+TEST_CASE("A printer whose multi-colour list was saved short loads one entry per filament slot", "[Preset][Bundle]")
+{
+    // Saved empty, as filament sync used to save it; shorter than the slots; or with a blank entry.
+    const std::string saved_multi_colors = GENERATE(std::string(""), std::string("#E64D19"), std::string("#E64D19,,#FFFFFF"));
+    const std::vector<std::string> colors = { "#E64D19", "#FFF700", "#FFFFFF" };
+
+    PresetBundle bundle;
+    add_inmemory_preset(bundle.printers, "Test Printer");
+    AppConfig app_config;
+    app_config.set("presets", PRESET_PRINTER_NAME, "Test Printer");
+    // The selected filament fills slot 1; filament_01 and filament_02 fill slots 2 and 3.
+    app_config.set_printer_setting("Test Printer", "filament_01", "Default Filament");
+    app_config.set_printer_setting("Test Printer", "filament_02", "Default Filament");
+    app_config.set_printer_setting("Test Printer", "filament_colors", "#E64D19,#FFF700,#FFFFFF");
+    app_config.set_printer_setting("Test Printer", "filament_multi_colors", saved_multi_colors);
+
+    bundle.load_selections(app_config, PresetBundle::PresetPreferences());
+
+    REQUIRE(bundle.project_config.option<ConfigOptionStrings>("filament_colour")->values == colors);
+    CHECK(bundle.project_config.option<ConfigOptionStrings>("filament_multi_colour")->values == colors);
+}
+
 TEST_CASE("A directory of user presets loads with each one resolved against its parent", "[Preset][Bundle]")
 {
     ScopedTemporaryDir   temp_dir;
